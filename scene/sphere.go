@@ -7,21 +7,17 @@ import (
 )
 
 type Sphere struct {
-	Center *types.Vec3
-	Radius float32
-	Color  *types.Vec3
+	Center   *types.Vec3
+	Radius   float32
+	Material Material
 }
 
-func NewSphere(Center *types.Vec3, Radius float32, Color *types.Vec3) *Sphere {
+func NewSphere(Center *types.Vec3, Radius float32, Material Material) *Sphere {
 	return &Sphere{
-		Center: Center,
-		Radius: Radius,
-		Color:  Color,
+		Center:   Center,
+		Radius:   Radius,
+		Material: Material,
 	}
-}
-
-func (s *Sphere) ColorAt(coor *types.Vec3) types.Vec3 {
-	return *s.Color
 }
 
 func (s *Sphere) Intersects(ray *types.Ray) (float32, bool) {
@@ -39,4 +35,13 @@ func (s *Sphere) Intersects(ray *types.Ray) (float32, bool) {
 		}
 	}
 	return 0, false
+}
+
+func (s *Sphere) Normal(surface_point types.Vec3) types.Vec3 {
+	// returns surface normal to the point on sphere's surface
+	return surface_point.Subtract(*s.Center).Normalize()
+}
+
+func (s *Sphere) GetMaterial() Material {
+	return s.Material
 }

@@ -10,10 +10,15 @@ import (
 
 type RenderEngine struct {
 	// render 3d objects into 2d objects
+	MAX_DEPTH    int
+	MIN_DISPLACE float32
 }
 
-func NewRenderEngine() *RenderEngine {
-	return &RenderEngine{}
+func NewRenderEngine(max_depth int, min_displace float32) *RenderEngine {
+	return &RenderEngine{
+		MAX_DEPTH:    max_depth,
+		MIN_DISPLACE: min_displace,
+	}
 }
 
 func (r *RenderEngine) Render(scene *scene.Scene) *types.Frame {
@@ -40,7 +45,7 @@ func (r *RenderEngine) Render(scene *scene.Scene) *types.Frame {
 		x := x0 + float32(i)*xstep
 		dir := (&types.Vec3{X: x, Y: y, Z: 0}).Subtract(*scene.Camera)
 		ray := types.NewRay(scene.Camera, &dir)
-		return r.RayTrace(ray, scene).ToColor()
+		return r.RayTrace(ray, scene, r.MAX_DEPTH).ToColor()
 	})
 	// for j := 0; j < int(scene.Height); j++ {
 	// 	y := y0 + float32(j)*ystep
@@ -54,14 +59,23 @@ func (r *RenderEngine) Render(scene *scene.Scene) *types.Frame {
 	return pixels
 }
 
-func (r *RenderEngine) RayTrace(ray *types.Ray, scn *scene.Scene) types.Vec3 {
-	color := types.Vec3{X: 0, Y: 0, Z: 0}
+func (r *RenderEngine) RayTrace(ray *types.Ray, scn *scene.Scene, depth int) types.Vec3 {
+	color := *types.NewVec3FromHex("#111111")
 	dist_hit, obj_hit := r.FindNearest(ray, scn)
 	if obj_hit == nil {
 		return color
 	}
 	hit_pos := ray.Origin.Add(ray.Direction.Multiply(dist_hit))
-	color = color.Add(r.ColorAt(obj_hit, hit_pos, scn))
+	hit_normal := obj_hit.Normal(hit_pos)
+	color = color.Add(r.ColorAt(obj_hit, hit_pos, hit_normal, scn))
+	if depth > 0 {
+		new_ray_pos := hit_pos.Add(hit_normal.Multiply(r.MIN_DISPLACE))
+		new_ray_dir := ray.Direction.Subtract(hit_normal.Multiply(2 * ray.Direction.Dot(hit_normal)))
+		new_ray := types.NewRay(&new_ray_pos, &new_ray_dir)
+
+		// Attenuate the reflected ray by reflection coefficient
+		color = color.Add(r.RayTrace(new_ray, scn, depth-1)).Multiply(obj_hit.GetMaterial().GetReflectionCoeff())
+	}
 	return color
 }
 
@@ -78,6 +92,31 @@ func (r *RenderEngine) FindNearest(ray *types.Ray, scn *scene.Scene) (float32, s
 	return distMin, obj_hit
 }
 
-func (r *RenderEngine) ColorAt(obj_hit scene.Object, hit_pos types.Vec3, scn *scene.Scene) types.Vec3 {
-	return obj_hit.ColorAt(&hit_pos)
+func (r *RenderEngine) ColorAt(obj_hit scene.Object, hit_pos types.Vec3, hit_normal types.Vec3, scn *scene.Scene) types.Vec3 {
+	material := obj_hit.GetMaterial()
+	obj_color := material.ColorAt(hit_pos)
+
+	specular_k := 60
+
+	to_cam := scn.Camera.Subtract(hit_pos)
+	color := types.NewVec3FromHex("#FFFFFF").Multiply(material.GetAmbient())
+
+	for _, light := range scn.Lights {
+		to_light_dir := light.Position.Subtract(hit_pos)
+		to_light := types.NewRay(&hit_pos, &to_light_dir)
+
+		// Diffuse shading (Lambert)
+		color = color.Add(obj_color.Multiply(
+			material.GetDiffuse() * float32(
+				math.Max(float64(hit_normal.Dot(*to_light.Direction)), 0),
+			),
+		))
+		// Specular Shading (Blinn-Phong)
+		half_vector := to_light.Direction.Add(to_cam).Normalize()
+		color = color.Add(light.Color.Multiply(material.GetSpecular()).Multiply(
+			float32(math.Pow(math.Max(float64(hit_normal.Dot(half_vector)), 0), float64(specular_k))),
+		))
+	}
+
+	return color
 }
